@@ -1,0 +1,30 @@
+{
+  "name": "gundb-wrangler",
+  "version": "0.1.0",
+  "description": "Used to help organize and define node types and their relations in a Gun database.",
+  "main": "index.js",
+  "scripts": {
+    "test": "\"echo \\\"Error: no test specified\\\" && exit 1\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ThinkingJoules/GunDB-Wrangler.git"
+  },
+  "keywords": [
+    "gun",
+    "db",
+    "schema",
+    "model",
+    "graph"
+  ],
+  "author": "ThinkingJoules",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/ThinkingJoules/GunDB-Wrangler/issues"
+  },
+  "homepage": "https://github.com/ThinkingJoules/GunDB-Wrangler#readme",
+  "dependencies": {
+    "ajv": "^6.5.5",
+    "global": "^4.3.2"
+  }
+}
