@@ -2,7 +2,7 @@
 import globalVar from 'global';
 import Ajv from 'ajv';
 var Gun = globalVar.Gun// || require('gun');
-var ajv = new Ajv({ useDefaults: true });
+var ajv = new Ajv();
 var nodeTypes
 
 if (!Gun)
@@ -36,7 +36,9 @@ function settle(newData) {
     let nodeSoul = gun['_']['soul']//gun id 'get' string
     if(!nodeTypes[type]){return console.log('INVALID NODETYPE')}
     //run newData through ajv
-    gun.once(function(oldData){
+    let oldData
+    gun.on(function(e){oldData = e})
+    console.log(oldData)
         if (oldData){
             //if the node already exists
             let result = nodeTypes[type].settle(newData,oldData)
@@ -57,9 +59,10 @@ function settle(newData) {
                 }
             }
             handleTags(gun, result, type)
+            
         }
-    })
-    return nodeSoul
+        return gunRoot.get(nodeSoul)
+    //})
 }
 function doubleLink(target){//intended to be used in place of .set. Target should be a gun.get("nodeType/00someID00")
     let gun = this;
@@ -67,47 +70,53 @@ function doubleLink(target){//intended to be used in place of .set. Target shoul
     let nodeSoul = gun['_']['soul'] || false //should be undefined > false if they 'get' to a setlist node
     if(nodeSoul){
         return console.log('Must select a property of a node with known nodeType, not the node itself. ie; .get("nodeType/00someID00").get("property").link(node)')}
-    gun.back().once(function(fromNode){
-        if (fromNode){
-            let parentType = fromNode['!TYPE']
-            let parentNodeSoul = Gun.node.soul(fromNode)
-            if(!nodeTypes[parentType]){return console.log('INVALID NODETYPE')}
-            target.once(function(targetNode){
-                if (targetNode){
-                    let targetType = targetNode['!TYPE']
-                    let targetNodeSoul = Gun.node.soul(targetNode)
-                    if(!nodeTypes[targetType]){return console.log('INVALID TARGET NODETYPE')}
-                    //if the node already exists and is of known type
-                        //Make sure the link is coming from a 'prev' key
-                            //if not, invert parent and target, check again
-                            //if not, error out
-                    let parentNextKey = Object.keys(nodeTypes[parentType]['next'])[0] //should only ever be a sinlge next key
-                    if(fromProp == parentNextKey){//if we are coming from the prev node (wrong way, should link down the tree)
-                        let fromChoices = Object.values(nodeTypes[targetType]['prev'])
-                        if(fromChoices.includes(fromProp)){
-                            let inverseProp = getKeyByValue(nodeTypes[targetType]['prev'], fromProp)//find correct prop to link prev node to
-                            target.get(inverseProp).get(parentNodeSoul).put({'#':parentNodeSoul}) //set
-                            gun.get(targetNodeSoul).put({'#': targetNodeSoul})//double set
-                        }else{
-                            return console.log('cannot link a next property, needs to be a prev property')
-                        }
 
+    let fromNode
+    let targetNode
+    gun.back().on(function(e){fromNode=e})
+    if (fromNode){
+        if(!fromNode[fromProp] || typeof fromNode[fromProp] !== 'object' || fromNode[fromProp] === null){gun.put({})}
+        let parentType = fromNode['!TYPE']
+        let parentNodeSoul = Gun.node.soul(fromNode)
+        if(!nodeTypes[parentType]){return console.log('INVALID NODETYPE')}
+            target.on(function(e){targetNode=e})
+            if (targetNode){
+                console.log(targetNode)
+                let targetType = targetNode['!TYPE']
+                let targetNodeSoul = Gun.node.soul(targetNode)
+                if(!nodeTypes[targetType]){return console.log('INVALID TARGET NODETYPE')}
+                //if the node already exists and is of known type
+                    //Make sure the link is coming from a 'prev' key
+                        //if not, invert parent and target, check again
+                        //if not, error out
+                let parentNextKey = Object.keys(nodeTypes[parentType]['next'])[0] //should only ever be a sinlge next key
+                if(fromProp == parentNextKey){//if we are coming from the prev node (wrong way, should link down the tree)
+                    let fromChoices = Object.values(nodeTypes[targetType]['prev'])
+                    if(fromChoices.includes(fromProp)){
+                        if(!target[inverseProp] || typeof target[inverseProp] !== 'object' || target[inverseProp] === null){target.get(inverseProp).put({})}
+                        let inverseProp = getKeyByValue(nodeTypes[targetType]['prev'], fromProp)//find correct prop to link prev node to
+                        target.get(inverseProp).get(parentNodeSoul).put({'#':parentNodeSoul}) //set
+                        gun.get(targetNodeSoul).put({'#': targetNodeSoul})//double set
                     }else{
-                    //correct orientation was entered
-                    let targetNextProp = Object.keys(nodeTypes[targetType]['next'])[0] //should only ever be a sinlge next key
-                    gun.get(targetNodeSoul).put({'#':targetNodeSoul}) //set
-                    target.get(targetNextProp).get(parentNodeSoul).put({'#':parentNodeSoul})//double set
+                        return console.log('cannot link a next property, needs to be a prev property')
                     }
+
                 }else{
-                    //no data
-                    return console.log('NODE DOES NOT EXIST')
+                let targetNextProp = Object.keys(nodeTypes[targetType]['next'])[0] //should only ever be a sinlge next key
+                if(!target[targetNextProp] || typeof target[targetNextProp] !== 'object' || target[targetNextProp] === null){target.get(targetNextProp).put({})}
+                //correct orientation was entered
+                gun.get(targetNodeSoul).put({'#':targetNodeSoul}) //set
+                console.log(targetNodeSoul)
+                target.get(targetNextProp).get(parentNodeSoul).put({'#':parentNodeSoul})//double set
                 }
-            })
+            }else{
+                //no data
+                return console.log('NODE DOES NOT EXIST')
+            }
         }else{
             //no data
             return console.log('NODE DOES NOT EXIST')
         }
-    })
     return gun
 }
 function doubleUnlink(target){//intended to be used in place of .set. Target should be a gun.get("nodeType/00someID00")
@@ -170,7 +179,7 @@ function newNode(nodeType){
         //gun.get('!ID').put(id) // save for settle, in case it doesn't get created
         return gun.get(nodeType + '/' + id)
     }else{
-        console.log('INVALID NODETYPE')
+        console.log(nodeType, ' IS NOT A VALID TYPE')
     }
 }
 function archive(){
@@ -361,11 +370,18 @@ function getTagged(tags, matchedKeys, inc, gun){//tags is an array of objects, w
         type: 'nodeType' //optional
     }]
     */
+    
     tags = tags || []
+    
     console.log(tags)
     gun = gun || this.back(-1)
     matchedKeys = matchedKeys || {}
     if(arguments.length === 1 && inc === undefined){//first call
+        if(!Array.isArray(tags)){
+            let arrTags = []
+            arrTags.push(tags)
+            tags = arrTags
+        }
         let initialKeys = getTagged(tags[0], matchedKeys, 0, gun)//list to check against
         if(tags.length > 1){
             for (let i = 1; i < tags.length; i++) {
@@ -615,21 +631,24 @@ export function reduceRight(treeArr, method , acc){
     return ret
 }
 function generateTreeObj(startNodeID, max){
-	let gun = this.back(-1)
+    let gun = this.back(-1)
+    if (startNodeID['_']['$']){startNodeID = startNodeID['_']['soul']}
 	let parentNode
 	gun.get(startNodeID).on(e => parentNode = Gun.obj.copy(e))
     let tree = assembleTree(gun, parentNode, startNodeID, max)//?
     return tree[0]
 }
 function generateTreeArr(startNodeID, max){
-	let gun = this.back(-1)
+    let gun = this.back(-1)
+    if (startNodeID['_']['$']){startNodeID = startNodeID['_']['soul']}
 	let parentNode
 	gun.get(startNodeID).on(e => parentNode = Gun.obj.copy(e))
     let tree = assembleTree(gun, parentNode, startNodeID, max)//?
     return tree[1]
 }
 function treeReduceRight(startNodeID, method, acc, max){
-	let gun = this
+    let gun = this.back(-1)
+    if (startNodeID['_']['$']){startNodeID = startNodeID['_']['soul']}
 	let parentNode
 	gun.get(startNodeID).on(e => parentNode = Gun.obj.copy(e))
     let tree = assembleTree(gun, parentNode, startNodeID, max)//?
