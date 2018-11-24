@@ -15,7 +15,7 @@ function wrangle(gun) {
     gun.newNode = newNode;
 	gun.settle = settle;
 	gun.getTree = generateTreeObj//returns object tree
-	gun.getTreeArr = generateTreeArr//returns array of levels in tree, work from right to left to go from bottom to top.
+	gun.getTreeArray = generateTreeArr//returns array of levels in tree, work from right to left to go from bottom to top.
     gun.treeReduceRight = treeReduceRight//would need options to map forward or backwards? Only bottom up?
     gun.archiveTag = archiveTag//set tag to 0 in visibility lists
     gun.getTagged = getTagged//(tags, prop, type), last two are optional, tags can be an array for intersect
@@ -31,37 +31,48 @@ function wrangle(gun) {
 function settle(newData) {
     let gun = this;
     let gunRoot = this.back(-1);
-    let nodeID = gun['_']['soul'].split('/')[1]//or ID string
-    let type = gun['_']['soul'].split('/')[0]
+    let nodeID = gun['_']['soul'].split('/')[1] || newData['!ID'] || null//or ID string
+    let type = gun['_']['soul'].split('/')[0] || newData['!TYPE'] || null
     let nodeSoul = gun['_']['soul']//gun id 'get' string
-    if(!nodeTypes[type]){return console.log('INVALID NODETYPE')}
-    //run newData through ajv
+    
+    //run newData through ajv?
     let oldData
     gun.on(function(e){oldData = e})
-    console.log(oldData)
-        if (oldData){
-            //if the node already exists
-            let result = nodeTypes[type].settle(newData,oldData)
-            for(const key in result.putObj){
-                if(!nodeTypes[type].whereTag.includes(key)){//skip tag fields, tags() handles this
-                    gun.get(key).put(result.putObj[key])
+    if (oldData){
+        if(!nodeTypes[type]){
+            if(oldData['!TYPE']){
+                if(!nodeTypes[oldData['!TYPE']]){
+                    return console.log('INVALID NODETYPE')
+                }else{
+                    type = oldData['!TYPE']
                 }
+            }else{
+                return console.log('INVALID NODETYPE')
             }
-            handleTags(gun, result, type)
-        }else{
-            //for a new node
-            gun.get('!ID').put(nodeID)
-            gunRoot.get('!TYPE/'+type).get(nodeSoul).put({'#':nodeSoul}) //setlist collection of same type nodes
-            let result = nodeTypes[type].settle(newData,false)
-            for(const key in result.putObj){
-                if(!nodeTypes[type].whereTag.includes(key)){//skip tag fields, tag() handles this
-                    gun.get(key).put(result.putObj[key])
-                }
-            }
-            handleTags(gun, result, type)
-            
         }
-        return gunRoot.get(nodeSoul)
+        //if the node already exists
+        let result = nodeTypes[type].settle(newData,oldData)
+        for(const key in result.putObj){
+            if(!nodeTypes[type].whereTag.includes(key)){//skip tag fields, tags() handles this
+                gun.get(key).put(result.putObj[key])
+            }
+        }
+        handleTags(gun, result, type)
+    }else{
+        if(!nodeTypes[type]){return console.log('INVALID NODETYPE')}
+        //for a new node
+        gun.get('!ID').put(nodeID)
+        gunRoot.get('!TYPE/'+type).get(nodeSoul).put({'#':nodeSoul}) //setlist collection of same type nodes
+        let result = nodeTypes[type].settle(newData,false)
+        for(const key in result.putObj){
+            if(!nodeTypes[type].whereTag.includes(key)){//skip tag fields, tag() handles this
+                gun.get(key).put(result.putObj[key])
+            }
+        }
+        handleTags(gun, result, type)
+        
+    }
+    return gunRoot.get(nodeSoul)
     //})
 }
 function doubleLink(target){//intended to be used in place of .set. Target should be a gun.get("nodeType/00someID00")
@@ -111,11 +122,11 @@ function doubleLink(target){//intended to be used in place of .set. Target shoul
                 }
             }else{
                 //no data
-                return console.log('NODE DOES NOT EXIST')
+                return console.log('TARGET NODE DOES NOT EXIST')
             }
         }else{
             //no data
-            return console.log('NODE DOES NOT EXIST')
+            return console.log('FROM NODE DOES NOT EXIST')
         }
     return gun
 }
@@ -253,7 +264,7 @@ function deleteNode(){
     let fromNodeSoul = gun['_']['soul'] || false
     let fromType
     if(!fromNodeSoul){
-        return console.log('Must select a node with known nodeType. ie; .get("nodeType/654someID123").delete()')}
+        return console.log('Must select a node with known nodeType. ie; gun.get("nodeType/654someID123").delete()')}
     gun.on(node => fromType = node['!TYPE'])
     let nextKey = Object.keys(nodeTypes[fromType]['next'])[0] //should only ever be a sinlge next key
     let prevKeys = Object.keys(nodeTypes[fromType]['prev'])
@@ -290,13 +301,14 @@ function deleteNode(){
 
     gun.once(function(archiveNode){//null out fields
         let type = archiveNode['!TYPE']
+        gunRoot.get('!TYPE/'+type+'/ARCHIVED').get(fromNodeSoul).put(null)
+        gunRoot.get('!TYPE/'+type+'/DELETED').get(fromNodeSoul).put({'#': fromNodeSoul})
         for (const key in archiveNode) {
-            if(key !== '_'){//otherwise we break things
+            if(key !== '_' || key !== '!DELETED'){//otherwise we break things
                 gun.get(key).put(null)
             }
         }
-        gunRoot.get('!TYPE/'+type+'/ARCHIVED').get(fromNodeSoul).put(null)
-        gunRoot.get('!TYPE/'+type+'/DELETED').get(fromNodeSoul).put({'#': fromNodeSoul})
+        
     })
 }
 //utility helpers
@@ -496,7 +508,7 @@ function getTags(tags){//no args, get 'TAGS_LIST', otherwise object with keys of
 
         return gun
     }
-    if(tags.hasOwnProperty('type' && !tags.hasOwnProperty('scope'))){
+    if(tags.hasOwnProperty('type') && !tags.hasOwnProperty('scope')){
         console.log('Please provide a scope or type + scope')
     }
     if(tags.hasOwnProperty('scope') && !tags.hasOwnProperty('type')){
@@ -517,7 +529,7 @@ function archiveTag(tag){//object with keys of 'tag', 'scope' and/or 'type'
 
         return gun
     }
-    if(tag.hasOwnProperty('type' && !tag.hasOwnProperty('scope'))){
+    if(tag.hasOwnProperty('type') && !tag.hasOwnProperty('scope')){
         console.log('Please provide a scope or type + scope')
     }
     if(tag.hasOwnProperty('scope') && tag.hasOwnProperty('tag') && !tag.hasOwnProperty('type')){
@@ -539,7 +551,7 @@ function addNodeTypes(nodeTypesObj) {
     //add schema to ajv?
 
 }
-function assembleTree(gun, node, fromID, max, inc, arr){
+function assembleTree(gun, node, fromID, archived, max, inc, arr){
     let res
     let idRef
     let newNode
@@ -571,13 +583,17 @@ function assembleTree(gun, node, fromID, max, inc, arr){
                 let subthings = []
                 console.log(lookup)
                 gun.get(lookup).map(function(node,id){
-                    subthings.push(node)
-                    let newObj = Object.assign({}, node)
-                    let nodeInfo = {data: newObj,
-                                    from: fromID,
-                                    prop: refsToTraverse[i]}
-                    let arrObj = Object.assign({}, idRef, nodeInfo)
-                    arr[inc].push(arrObj) 
+                    if(!archived && node['!DELETED']){
+                        
+                    }else{
+                        subthings.push(node)
+                        let newObj = Object.assign({}, node)
+                        let nodeInfo = {data: newObj,
+                                        from: fromID,
+                                        prop: refsToTraverse[i]}
+                        let arrObj = Object.assign({}, idRef, nodeInfo)
+                        arr[inc].push(arrObj)
+                    }
                 })
             node[refsToTraverse[i]] = Gun.obj.copy(subthings)
             }
@@ -588,7 +604,7 @@ function assembleTree(gun, node, fromID, max, inc, arr){
             if (node[refsToTraverse[i]]){
                 for (let j = 0; j < node[refsToTraverse[i]].length; j++){
                 let nextLevel = node[refsToTraverse[i]][j]
-                assembleTree(gun, nextLevel, idRef.id, max, inc, arr);//fires for each prop with refs, and once for each ref on said prop
+                assembleTree(gun, nextLevel, idRef.id, archived, max, inc, arr);//fires for each prop with refs, and once for each ref on said prop
                 }
             }
         }
@@ -606,18 +622,21 @@ export function reduceRight(treeArr, method , acc){
             let node = (calcArr[i][j].data) ? calcArr[i][j].data : calcArr[i][j]//?
             let fromID = calcArr[i][j].from
             let fromProp = calcArr[i][j].prop
-            if(node){
+            if(node && !node['!DELETED']){
                 let mapper = nodeTypes[node['!TYPE']]["methods"][method]
                 let res = mapper(node)
                 reduced += res
-                console.log(res)
+                console.log(calcArr[i][j])
                 calcArr[i][j].data = res//?
-                let parent = _.find(calcArr[i-1], ['id', fromID])
+                //let parent = _.find(calcArr[i-1], ['id', fromID])
+                let parent = (calcArr[i-1]) ? calcArr[i-1].find(function(i){
+                    return i.id == fromID
+                }) : undefined
                 if(!parent){
                     console.log(reduced)
                     treeArr = res
                 }else{
-                    if(typeof parent.data[fromProp] === 'object'){//if it is a ref, replace with first valie
+                    if(typeof parent.data[fromProp] !== 'number'){//if it is a ref, replace with first value
                     parent.data[fromProp] = res
                     }else{
                         parent.data[fromProp] += res //if not a ref, then take old value and add it to new value
@@ -630,20 +649,22 @@ export function reduceRight(treeArr, method , acc){
     let ret = (acc) ? reduced : treeArr
     return ret
 }
-function generateTreeObj(startNodeID, max){
+function generateTreeObj(startNodeID, max, archived){
     let gun = this.back(-1)
+    archived = archived || false
     if (startNodeID['_']['$']){startNodeID = startNodeID['_']['soul']}
 	let parentNode
 	gun.get(startNodeID).on(e => parentNode = Gun.obj.copy(e))
-    let tree = assembleTree(gun, parentNode, startNodeID, max)//?
+    let tree = assembleTree(gun, parentNode, startNodeID, archived, max)//?
     return tree[0]
 }
-function generateTreeArr(startNodeID, max){
+function generateTreeArr(startNodeID, max, archived){
     let gun = this.back(-1)
+    archived = archived || false
     if (startNodeID['_']['$']){startNodeID = startNodeID['_']['soul']}
 	let parentNode
 	gun.get(startNodeID).on(e => parentNode = Gun.obj.copy(e))
-    let tree = assembleTree(gun, parentNode, startNodeID, max)//?
+    let tree = assembleTree(gun, parentNode, startNodeID, archived, max)//?
     return tree[1]
 }
 function treeReduceRight(startNodeID, method, acc, max){
@@ -651,7 +672,7 @@ function treeReduceRight(startNodeID, method, acc, max){
     if (startNodeID['_']['$']){startNodeID = startNodeID['_']['soul']}
 	let parentNode
 	gun.get(startNodeID).on(e => parentNode = Gun.obj.copy(e))
-    let tree = assembleTree(gun, parentNode, startNodeID, max)//?
+    let tree = assembleTree(gun, parentNode, startNodeID, false, max)//?
     let methodCalc = reduceRight(tree[1], method, acc)
     return methodCalc
 }
