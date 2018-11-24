@@ -1,6 +1,6 @@
 {
   "name": "gundb-wrangler",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Used to help organize and define node types and their relations in a Gun database.",
   "main": "index.js",
   "scripts": {
