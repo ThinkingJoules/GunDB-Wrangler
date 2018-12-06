@@ -24,7 +24,9 @@
   },
   "homepage": "https://github.com/ThinkingJoules/GunDB-Wrangler#readme",
   "dependencies": {
-    "ajv": "^6.5.5",
-    "global": "^4.3.2"
+    "babel-preset-es2015": "^6.24.1",
+    "babel-preset-react": "^6.24.1",
+    "global": "^4.3.2",
+    "gun": "^0.9.99999"
   }
 }

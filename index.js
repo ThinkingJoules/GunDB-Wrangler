@@ -1,8 +1,12 @@
 "use strict";
-import globalVar from 'global';
-import Ajv from 'ajv';
-var Gun = globalVar.Gun// || require('gun');
-var ajv = new Ajv();
+var globalVar = require("global");
+//import Ajv from 'ajv';
+if(typeof window !== "undefined"){
+    var Gun = globalVar.Gun;
+  } else {
+    var Gun = global.Gun;
+  }
+//var ajv = new Ajv();
 var nodeTypes
 
 if (!Gun)
@@ -13,9 +17,9 @@ wrangle(Gun.chain);
 function wrangle(gun) {
     gun.addNodeTypes = addNodeTypes;
     gun.newNode = newNode;
-	gun.settle = settle;
-	gun.getTree = generateTreeObj//returns object tree
-	gun.getTreeArray = generateTreeArr//returns array of levels in tree, work from right to left to go from bottom to top.
+    gun.settle = settle;
+    gun.getTree = generateTreeObj//returns object tree
+    gun.getTreeArray = generateTreeArr//returns array of levels in tree, work from right to left to go from bottom to top.
     gun.treeReduceRight = treeReduceRight//would need options to map forward or backwards? Only bottom up?
     gun.archiveTag = archiveTag//set tag to 0 in visibility lists
     gun.getTagged = getTagged//(tags, prop, type), last two are optional, tags can be an array for intersect
@@ -25,9 +29,150 @@ function wrangle(gun) {
     gun.archive = archive
     gun.unarchive = unarchive
     gun.delete = deleteNode
+
+    gun.massNewPut = massNewPut
+    gun.linkImport = linkImport
 }
 
 //utility helpers
+function linkImport(nextType, linkProp, prevType, keyProp){
+    gun = this.back(-1)
+    let next = new Promise( (resolve, reject) => {
+        let lookup = gun.get('!TYPE/' + nextType).then()
+        resolve(lookup)
+    })
+    let prev = new Promise( (resolve, reject) => {
+        let lookup = gun.get('!TYPE/' + prevType).then()
+        resolve(lookup)
+    })
+    Promise.all([next, prev])
+        .then(function(res){
+            // let filtered = []
+            // for (let i = 0; i < res.length; i++) {
+            //     const setNode = res[i];
+            //     for (const key in setNode) {
+            //         const value = setNode[key];
+            //         if (value !== null && key !== '_'){
+            //             if (!Array.isArray(filtered[i])){
+            //                 filtered[i] = []
+            //             }
+            //             filtered[i].push(key)
+            //         }
+            //     }
+            // }
+            // console.log(filtered)
+            Promise.all(res.map(function(collection) {
+                return fetchGunCollection(Object.keys(collection));
+            }))
+            .then(result => {
+                console.log(result)
+            });    
+        })
+    
+    // let prev = new Promise( (resolve, reject) => {
+    //     let lookup = gun.get('!TYPE/' + prevType).then()
+    //     let keys = Object.keys(lookup)
+    //     resolve(keys)
+    // }).then( (prevKeys)=> {
+    //     next.then( (nextKeys)=> {
+
+    //     })
+    // })
+    
+}
+function fetchGunCollection(arr) {
+    return Promise.all(arr.map(function(item) {
+        return fetchGunKey(item);
+    }));    
+}
+
+function fetchGunKey(key) {
+
+    return new Promise( (resolve, reject) => {
+        let lookup = gun.get(key).then()
+        resolve(lookup)
+        }) 
+}
+
+function massNewPut(state, putString, setString, data, failedArr, idObj) {
+	let gun = this;
+
+	switch(state) {
+		case 0:
+			console.log('start');
+			var tempIdObj = {};
+			for(let i = 0; i < data.length; i++) {
+				// if(i && (i % 50 == 0)) {
+				//   localStorage.clear();
+				// }
+                let newNode = gun.newNode(putString)
+                let id = newNode['_']['soul'].split('/')[1]
+				data[i]._importId = id;
+				tempIdObj[data[i]._importId] = 0;
+
+				newNode.settle(data[i]);
+
+
+
+				if(i == (data.length - 1)) {
+					console.log(id);
+					gun.massNewPut(1, putString, setString, data, [], tempIdObj);
+				}
+			}
+			break;
+		case 1:
+			console.log('put 1');
+			setTimeout(function() {
+				for(let i = 0; i < data.length; i++) {
+			        // if(i && (i % 50 == 0)) {
+			        //     localStorage.clear();
+			        // }
+			          
+			        var getString = putString + '/' + data[i]._importId;
+			        let exist
+			      	gun.get(getString).on(function(thing) {
+			        	exist = thing;
+			        });
+
+			        if(!exist) {
+			    	    failedArr.push(data[i]);
+			        }
+
+			        if(i == (data.length - 1)) {			            
+			            gun.massNewPut(2, putString, setString, data, failedArr, idObj);
+			        }
+			    }
+			}, 5000);
+		    break;
+		case 2:
+			console.log('put 2');
+			console.log(failedArr.length);
+			if(failedArr.length == 0) {
+				console.log('put done');
+				//gun.massSet(0, putString, setString, data, idObj);
+			}
+			else {
+				for(let i = 0; i < failedArr.length; i++) {
+					// if(i && (i % 50 == 0)) {
+					// 	localStorage.clear();
+					// }
+				  
+					var getString = putString + '/' + failedArr[i]._importId;
+
+					gun.get(getString).put(failedArr[i]);
+
+
+					if(i == (failedArr.length - 1)) {
+						gun.massNewPut(1, putString, setString, data, [], idObj);
+					}
+				}
+			}
+			break;
+		case 4: 
+			console.log(gun);
+			break;
+	}
+}
 function settle(newData) {
     let gun = this;
     let gunRoot = this.back(-1);
@@ -36,44 +181,72 @@ function settle(newData) {
     let nodeSoul = gun['_']['soul']//gun id 'get' string
     
     //run newData through ajv?
-    let oldData
-    gun.on(function(e){oldData = e})
-    if (oldData){
-        if(!nodeTypes[type]){
-            if(oldData['!TYPE']){
-                if(!nodeTypes[oldData['!TYPE']]){
-                    return console.log('INVALID NODETYPE')
+    let check = new Promise( (resolve, reject) => {
+        let exist = gun.then()
+        resolve(exist)
+    })
+    check.then( (oldData) => {
+        if (oldData){
+            if(!nodeTypes[type]){
+                if(oldData['!TYPE']){
+                    if(!nodeTypes[oldData['!TYPE']]){
+                        return console.log('INVALID NODETYPE')
+                    }else{
+                        type = oldData['!TYPE']
+                    }
                 }else{
-                    type = oldData['!TYPE']
+                    return console.log('INVALID NODETYPE')
                 }
-            }else{
-                return console.log('INVALID NODETYPE')
             }
-        }
-        //if the node already exists
-        let result = nodeTypes[type].settle(newData,oldData)
-        for(const key in result.putObj){
-            if(!nodeTypes[type].whereTag.includes(key)){//skip tag fields, tags() handles this
-                gun.get(key).put(result.putObj[key])
+            //if the node already exists
+            let result = nodeTypes[type].settle(newData,oldData)
+            for(const key in result.putObj){
+                if(!nodeTypes[type].whereTag.includes(key)){//skip tag fields, tags() handles this
+                    gun.get(key).put(result.putObj[key])
+                }
             }
-        }
-        handleTags(gun, result, type)
-    }else{
-        if(!nodeTypes[type]){return console.log('INVALID NODETYPE')}
-        //for a new node
-        gun.get('!ID').put(nodeID)
-        gunRoot.get('!TYPE/'+type).get(nodeSoul).put({'#':nodeSoul}) //setlist collection of same type nodes
-        let result = nodeTypes[type].settle(newData,false)
-        for(const key in result.putObj){
-            if(!nodeTypes[type].whereTag.includes(key)){//skip tag fields, tag() handles this
-                gun.get(key).put(result.putObj[key])
+            handleTags(gun, result, type)
+        }else{
+            if(!nodeTypes[type]){return console.log('INVALID NODETYPE')}
+            //for a new node
+            gun.get('!ID').put(nodeID)
+            gunRoot.get('!TYPE/'+type).get(nodeSoul).put({'#':nodeSoul}) //setlist collection of same type nodes
+            if (nodeTypes[type].uniqueFields){
+                let fields = nodeTypes[type].uniqueFields
+                for (let i = 0; i < fields.length; i++) {
+                    let num
+                    let gs = '!TYPE/'+ type + '/uniqueFields'
+                    let field = Object.keys(fields[i])[0]
+                    if (!newData[field]){
+                        num = new Promise( (resolve, reject) => {
+                        let data = gunRoot.get(gs).get(field).then()
+                        resolve(data)
+                        })
+                        num.then( (curNum) => {
+                            if (curNum){
+                                gun.get(field).put(curNum)
+                                curNum++
+                                gunRoot.get(gs).get(field).put(curNum)
+                            }else{
+                                curNum = nodeTypes[type].uniqueFields[i][field].start
+                                gun.get(field).put(curNum)
+                                curNum++
+                                gunRoot.get(gs).get(field).put(curNum)
+                            }
+                        })
+                    }
+                }
             }
+            let result = nodeTypes[type].settle(newData,false)
+            for(const key in result.putObj){
+                if(!nodeTypes[type].whereTag.includes(key)){//skip tag fields, tag() handles this
+                    gun.get(key).put(result.putObj[key])
+                }
+            }
+            handleTags(gun, result, type) 
         }
-        handleTags(gun, result, type)
-        
-    }
+    })
     return gunRoot.get(nodeSoul)
-    //})
 }
 function doubleLink(target){//intended to be used in place of .set. Target should be a gun.get("nodeType/00someID00")
     let gun = this;
@@ -81,67 +254,81 @@ function doubleLink(target){//intended to be used in place of .set. Target shoul
     let nodeSoul = gun['_']['soul'] || false //should be undefined > false if they 'get' to a setlist node
     if(nodeSoul){
         return console.log('Must select a property of a node with known nodeType, not the node itself. ie; .get("nodeType/00someID00").get("property").link(node)')}
-
-    let fromNode
-    let targetNode
-    gun.back().on(function(e){fromNode=e})
-    if (fromNode){
-        if(!fromNode[fromProp] || typeof fromNode[fromProp] !== 'object' || fromNode[fromProp] === null){gun.put({})}
-        let parentType = fromNode['!TYPE']
-        let parentNodeSoul = Gun.node.soul(fromNode)
-        if(!nodeTypes[parentType]){return console.log('INVALID NODETYPE')}
-            target.on(function(e){targetNode=e})
-            if (targetNode){
-                console.log(targetNode)
-                let targetType = targetNode['!TYPE']
-                let targetNodeSoul = Gun.node.soul(targetNode)
-                if(!nodeTypes[targetType]){return console.log('INVALID TARGET NODETYPE')}
-                //if the node already exists and is of known type
-                    //Make sure the link is coming from a 'prev' key
-                        //if not, invert parent and target, check again
-                        //if not, error out
-                let parentNextKey = Object.keys(nodeTypes[parentType]['next'])[0] //should only ever be a sinlge next key
-                if(fromProp == parentNextKey){//if we are coming from the prev node (wrong way, should link down the tree)
-                    let fromChoices = Object.values(nodeTypes[targetType]['prev'])
-                    if(fromChoices.includes(fromProp)){
-                        if(!target[inverseProp] || typeof target[inverseProp] !== 'object' || target[inverseProp] === null){target.get(inverseProp).put({})}
-                        let inverseProp = getKeyByValue(nodeTypes[targetType]['prev'], fromProp)//find correct prop to link prev node to
-                        target.get(inverseProp).get(parentNodeSoul).put({'#':parentNodeSoul}) //set
-                        gun.get(targetNodeSoul).put({'#': targetNodeSoul})//double set
+    let check = new Promise( (resolve, reject) => {
+        let exist =  gun.back().then()
+        resolve(exist)
+    })
+    let targetProm = new Promise( (resolve, reject) => {
+        let exist =  target.then()
+        resolve(exist)
+    })
+    check.then( (fromNode) => {
+        if (fromNode){
+            if(!fromNode[fromProp] || typeof fromNode[fromProp] !== 'object' || fromNode[fromProp] === null){gun.put({})}
+            let parentType = fromNode['!TYPE']
+            let parentNodeSoul = Gun.node.soul(fromNode)
+            if(!nodeTypes[parentType]){return console.log('INVALID NODETYPE')}
+            targetProm.then( (targetNode) => {
+                if (targetNode){
+                    console.log(targetNode)
+                    let targetType = targetNode['!TYPE']
+                    let targetNodeSoul = Gun.node.soul(targetNode)
+                    if(!nodeTypes[targetType]){return console.log('INVALID TARGET NODETYPE')}
+                    //if the node already exists and is of known type
+                        //Make sure the link is coming from a 'prev' key
+                            //if not, invert parent and target, check again
+                            //if not, error out
+                    let parentNextKey = Object.keys(nodeTypes[parentType]['next'])[0] //should only ever be a sinlge next key
+                    if(fromProp == parentNextKey){//if we are coming from the prev node (wrong way, should link down the tree)
+                        let fromChoices = Object.values(nodeTypes[targetType]['prev'])
+                        if(fromChoices.includes(fromProp)){
+                            if(!target[inverseProp] || typeof target[inverseProp] !== 'object' || target[inverseProp] === null){target.get(inverseProp).put({})}
+                            let inverseProp = getKeyByValue(nodeTypes[targetType]['prev'], fromProp)//find correct prop to link prev node to
+                            target.get(inverseProp).get(parentNodeSoul).put({'#':parentNodeSoul}) //set
+                            gun.get(targetNodeSoul).put({'#': targetNodeSoul})//double set
+                            }else{
+                                return console.log('cannot link a next property, needs to be a prev property')
+                            }
                     }else{
-                        return console.log('cannot link a next property, needs to be a prev property')
-                    }
-
+                        let targetNextProp = Object.keys(nodeTypes[targetType]['next'])[0] //should only ever be a sinlge next key
+                        if(!target[targetNextProp] || typeof target[targetNextProp] !== 'object' || target[targetNextProp] === null){target.get(targetNextProp).put({})}
+                        //correct orientation was entered
+                        gun.get(targetNodeSoul).put({'#':targetNodeSoul}) //set
+                        console.log(targetNodeSoul)
+                        target.get(targetNextProp).get(parentNodeSoul).put({'#':parentNodeSoul})//double set
+                        }
                 }else{
-                let targetNextProp = Object.keys(nodeTypes[targetType]['next'])[0] //should only ever be a sinlge next key
-                if(!target[targetNextProp] || typeof target[targetNextProp] !== 'object' || target[targetNextProp] === null){target.get(targetNextProp).put({})}
-                //correct orientation was entered
-                gun.get(targetNodeSoul).put({'#':targetNodeSoul}) //set
-                console.log(targetNodeSoul)
-                target.get(targetNextProp).get(parentNodeSoul).put({'#':parentNodeSoul})//double set
+                    //no data
+                    return console.log('TARGET NODE DOES NOT EXIST')
                 }
-            }else{
-                //no data
-                return console.log('TARGET NODE DOES NOT EXIST')
-            }
+            })  
         }else{
             //no data
             return console.log('FROM NODE DOES NOT EXIST')
         }
+    })
     return gun
 }
 function doubleUnlink(target){//intended to be used in place of .set. Target should be a gun.get("nodeType/00someID00")
     let gun = this;
     let fromProp = gun['_']['get'] || false//gun id last 'get', should be a prop of a known nodeType
     let nodeSoul = gun['_']['soul'] || false //should be undefined > false if they 'get' to a setlist node
-    if(nodeSoul){
-        return console.log('Must select a property of a node with known nodeType, not the node itself. ie; .get("nodeType/00someID00").get("property").link(node)')}
-    gun.back().once(function(fromNode){
+    if(nodeSoul){return console.log('Must select a property of a node with known nodeType, not the node itself. ie; .get("nodeType/00someID00").get("property").link(node)')}
+    let check = new Promise( (resolve, reject) => {
+        let exist =  gun.back().then()
+        resolve(exist)
+    })
+    let targetProm = new Promise( (resolve, reject) => {
+        let exist =  target.then()
+        resolve(exist)
+    })
+    check.then( (fromNode) => {
         if (fromNode){
+            if(!fromNode[fromProp] || typeof fromNode[fromProp] !== 'object' || fromNode[fromProp] === null){gun.put({})}
             let parentType = fromNode['!TYPE']
             let parentNodeSoul = Gun.node.soul(fromNode)
             if(!nodeTypes[parentType]){return console.log('INVALID NODETYPE')}
-            target.once(function(targetNode){
+            targetProm.then( (targetNode) => {
                 if (targetNode){
                     let targetType = targetNode['!TYPE']
                     let targetNodeSoul = Gun.node.soul(targetNode)
@@ -157,24 +344,24 @@ function doubleUnlink(target){//intended to be used in place of .set. Target sho
                             let inverseProp = getKeyByValue(nodeTypes[targetType]['prev'], fromProp)//find correct prop to link prev node to
                             target.get(inverseProp).get(parentNodeSoul).put(null) //set
                             gun.get(targetNodeSoul).put(null)//double set
-                        }else{
-                            return console.log('cannot link a next property, needs to be a prev property')
-                        }
-
+                            }else{
+                                return console.log('cannot link a next property, needs to be a prev property')
+                            }
                     }else{
-                        //correct orientation was entered
                         let targetNextProp = Object.keys(nodeTypes[targetType]['next'])[0] //should only ever be a sinlge next key
+                        if(!target[targetNextProp] || typeof target[targetNextProp] !== 'object' || target[targetNextProp] === null){target.get(targetNextProp).put({})}
+                        //correct orientation was entered
                         gun.get(targetNodeSoul).put(null) //set
                         target.get(targetNextProp).get(parentNodeSoul).put(null)//double set
-                    }
+                        }
                 }else{
                     //no data
-                    return console.log('NODE DOES NOT EXIST')
+                    return console.log('TARGET NODE DOES NOT EXIST')
                 }
-            })
+            })  
         }else{
             //no data
-            return console.log('NODE DOES NOT EXIST')
+            return console.log('FROM NODE DOES NOT EXIST')
         }
     })
     return gun
@@ -262,53 +449,47 @@ function deleteNode(){
     let gun = this;
     let gunRoot = this.back(-1)
     let fromNodeSoul = gun['_']['soul'] || false
-    let fromType
     if(!fromNodeSoul){
         return console.log('Must select a node with known nodeType. ie; gun.get("nodeType/654someID123").delete()')}
-    gun.on(node => fromType = node['!TYPE'])
-    let nextKey = Object.keys(nodeTypes[fromType]['next'])[0] //should only ever be a sinlge next key
-    let prevKeys = Object.keys(nodeTypes[fromType]['prev'])
-    //gather 'next'
-    let nextNodes = {}
-    gun.get(nextKey).on(function(ids){
-        for (const key in ids) {
-            if(ids[key] !== null){
-                nextNodes[key] = {'#':key}
-            }
-        }
+    let check = new Promise( (resolve, reject) => {
+        let exist = gun.then()
+        resolve(exist)
     })
-    //gather 'prev'
-    let prevNodes = {}
-    for (let i = 0; i < prevKeys.length; i++) {
-        const prop = prevKeys[i];
-        gun.get(prop).on(function(ids){
-            for (const key in ids) {
-                if(ids[key] !== null){
-                    prevNodes[key] = prop
+    check.then( (data) => {
+        let fromType = data['!TYPE']
+        let nextKey = Object.keys(nodeTypes[fromType]['next'])[0] //should only ever be a sinlge next key
+        let prevKeys = Object.keys(nodeTypes[fromType]['prev'])
+        gun.get(nextKey).on( (ids) => {
+                for (const key in ids) {
+                    if(ids[key] !== null){
+                        gun.get(key).unlink(gunRoot.get(fromNodeSoul))
+                    }
                 }
-            }
-        })
-    }
-    //unlink
-    for (const key in prevNodes) {
-        let prop = prevNodes[key]
-        gun.get(prop).unlink(gunRoot.get(key))
-    }
-    for (const key in nextNodes) {
-        gun.get(nextKey).unlink(gunRoot.get(key))
-    }
-
-
-    gun.once(function(archiveNode){//null out fields
-        let type = archiveNode['!TYPE']
-        gunRoot.get('!TYPE/'+type+'/ARCHIVED').get(fromNodeSoul).put(null)
-        gunRoot.get('!TYPE/'+type+'/DELETED').get(fromNodeSoul).put({'#': fromNodeSoul})
-        for (const key in archiveNode) {
-            if(key !== '_' || key !== '!DELETED'){//otherwise we break things
-                gun.get(key).put(null)
-            }
+            })
+        for (let i = 0; i < prevKeys.length; i++) {
+            const prop = prevKeys[i];
+            gun.get(prop).on(function(ids){
+                for (const key in ids) {
+                    if(ids[key] !== null){
+                        gun.get(fromNodeSoul).unlink(gunRoot.get(key))
+                    }
+                }
+            })
         }
-        
+
+
+
+        // gun.once(function(archiveNode){//null out fields
+        //     let type = archiveNode['!TYPE']
+        //     gunRoot.get('!TYPE/'+type+'/ARCHIVED').get(fromNodeSoul).put(null)
+        //     gunRoot.get('!TYPE/'+type+'/DELETED').get(fromNodeSoul).put({'#': fromNodeSoul})
+        //     for (const key in archiveNode) {
+        //         if(key !== '_' || key !== '!DELETED'){//otherwise we break things
+        //             gun.get(key).put(null)
+        //         }
+        //     }
+            
+        // })
     })
 }
 //utility helpers
@@ -329,50 +510,59 @@ function tags(gun, tag, scope) {
     if(!tag || typeof tag !== 'string' ) { return };
     let gunRoot = gun.back(-1);
     let nodeSoul = gun['_']['soul']
-    let type
-    gun.on(node => type = node['!TYPE'])
-    //first 3 will be used for data retrieval in the UI
-    gunRoot.get('!TAGS/' + tag).get(nodeSoul).put({'#':nodeSoul});//get nodes of all types with any tag 'tag' (ignore which prop or 'scope')
-    gunRoot.get('!TAGS/' + scope).get(tag).get(nodeSoul).put({'#':nodeSoul});//get nodes of all types with a scoped tag 'scope' with tag 'tag'
-    gunRoot.get('!TAGS/' + type + '/' + scope).get(tag).get(nodeSoul).put({'#':nodeSoul});//get nodes of specific type with a scoped tag 'prop' with tag 'tag'
-    //next 3 would be used to populate dropdowns or autofills in certain contexts in the UI, 1 means visible, 0 means archived
-    gunRoot.get('!TAGS_LIST').get(tag).once(function(_tag){
-        if(_tag === undefined){// add new tag to lists
-            gunRoot.get('!TAGS_LIST').get(tag).put(1);
-        }
+    let check = new Promise( (resolve, reject) => {
+        let exist = gun.then()
+        resolve(exist)
     })
-    gunRoot.get('!TAGS_LIST/' + scope).get(tag).once(function(_tag){
-        if(_tag === undefined){// add new tag to lists
-            gunRoot.get('!TAGS_LIST/' + scope).get(tag).put(1);
-        }
+    check.then( (data) => {
+        let type = data['!TYPE']
+        //first 3 will be used for data retrieval in the UI
+        gunRoot.get('!TAGS/' + tag).get(nodeSoul).put({'#':nodeSoul});//get nodes of all types with any tag 'tag' (ignore which prop or 'scope')
+        gunRoot.get('!TAGS/' + scope).get(tag).get(nodeSoul).put({'#':nodeSoul});//get nodes of all types with a scoped tag 'scope' with tag 'tag'
+        gunRoot.get('!TAGS/' + type + '/' + scope).get(tag).get(nodeSoul).put({'#':nodeSoul});//get nodes of specific type with a scoped tag 'prop' with tag 'tag'
+        //next 3 would be used to populate dropdowns or autofills in certain contexts in the UI, 1 means visible, 0 means archived
+        gunRoot.get('!TAGS_LIST').get(tag).once(function(_tag){
+            if(_tag === undefined){// add new tag to lists
+                gunRoot.get('!TAGS_LIST').get(tag).put(1);
+            }
+        })
+        gunRoot.get('!TAGS_LIST/' + scope).get(tag).once(function(_tag){
+            if(_tag === undefined){// add new tag to lists
+                gunRoot.get('!TAGS_LIST/' + scope).get(tag).put(1);
+            }
+        })
+        gunRoot.get('!TAGS_LIST/SCOPES').get(scope).once(function(_tag){
+            if(_tag === undefined){// add new tag to lists
+                gunRoot.get('!TAGS_LIST/SCOPES').get(scope).put(1);
+            }
+        })
+        gunRoot.get('!TAGS_LIST/' + type + '/' + scope).get(tag).once(function(_tag){
+            if(_tag === undefined){// add new tag to lists
+                gunRoot.get('!TAGS_LIST/' + type + '/' + scope).get(tag).put(1);
+            }
+        })
+        //set tag state on node, 1 means current tag, 0 means tag was removed
+        gun.get(scope).get(tag).put(1);
     })
-    gunRoot.get('!TAGS_LIST/SCOPES').get(scope).once(function(_tag){
-        if(_tag === undefined){// add new tag to lists
-            gunRoot.get('!TAGS_LIST/SCOPES').get(scope).put(1);
-        }
-    })
-    gunRoot.get('!TAGS_LIST/' + type + '/' + scope).get(tag).once(function(_tag){
-        if(_tag === undefined){// add new tag to lists
-            gunRoot.get('!TAGS_LIST/' + type + '/' + scope).get(tag).put(1);
-        }
-    })
-    //set tag state on node, 1 means current tag, 0 means tag was removed
-    gun.get(scope).get(tag).put(1);
 };
 function untag(gun, tag, prop) {
     if(!tag || typeof tag !== 'string' ) { return };
     let gunRoot = gun.back(-1);
     let nodeSoul = gun['_']['soul']
-    let type
 
-    gun.on(node => type = node['!TYPE'])
-    console.log(type)
-    //first 3 will be used for data retrieval in the UI
-    gunRoot.get('!TAGS/' + tag).get(nodeSoul).put(null);//get nodes of all types with any tag 'tag' (ignore which prop or 'scope')
-    gunRoot.get('!TAGS/' + prop).get(tag).get(nodeSoul).put(null);//get nodes of all types with a scoped tag 'prop' with tag 'tag'
-    gunRoot.get('!TAGS/' + type + '/' + prop).get(tag).get(nodeSoul).put(null);//get nodes of specific type with a scoped tag 'prop' with tag 'tag'
-    //set tag state on node, 1 means current tag, 0 means tag was removed
-    gun.get(prop).get(tag).put(0).on(e=> console.log(e));
+    let check = new Promise( (resolve, reject) => {
+        let exist = gun.then()
+        resolve(exist)
+    })
+    check.then( (data) => {
+        let type = data['!TYPE']
+        //first 3 will be used for data retrieval in the UI
+        gunRoot.get('!TAGS/' + tag).get(nodeSoul).put(null);//get nodes of all types with any tag 'tag' (ignore which prop or 'scope')
+        gunRoot.get('!TAGS/' + prop).get(tag).get(nodeSoul).put(null);//get nodes of all types with a scoped tag 'prop' with tag 'tag'
+        gunRoot.get('!TAGS/' + type + '/' + prop).get(tag).get(nodeSoul).put(null);//get nodes of specific type with a scoped tag 'prop' with tag 'tag'
+        //set tag state on node, 1 means current tag, 0 means tag was removed
+        gun.get(prop).get(tag).put(0).on(e=> console.log(e));
+    })
 };
 function getTagged(tags, matchedKeys, inc, gun){//tags is an array of objects, with keys of tag, prop, and type
     /* sample tags
@@ -409,26 +599,56 @@ function getTagged(tags, matchedKeys, inc, gun){//tags is an array of objects, w
     }else{//2,3,..n calls
         //expects an object, not array on all calls after first
         const keys = Object.keys(tags)
-        let newKeys = {}
+        
         switch (keys.length) {//number of keys in tag query object
             case 3:
-                gun.get('!TAGS/' + tags.type + '/' + tags.scope).get(tags.tag).on(function(ids){
+                let check = new Promise( (resolve, reject) => {
+                    let newKeys = gun.get('!TAGS/' + tags.type + '/' + tags.scope).get(tags.tag).then()
+                    
+                    resolve(newKeys)
+                })
+                check.then( (ids) => {
                     for (const key in ids) {
                         if(ids[key] !== null){
                             newKeys[key] = {'#':key}
+                        }
+                    }
+                    if(Object.keys(matchedKeys).length == 0){//only runs on 2nd call of function
+                        let objCopy = Object.assign({},newKeys)
+                        return objCopy
+                    }else{// checks for keys in this call vs the initial call keys
+                        for (const key in matchedKeys) {
+                            if(!newKeys.hasOwnProperty(key)){
+                                delete matchedKeys[key]//removes all keys that don't match
+                            }
                         }
                     }
                 })
                 break;
             case 2:
                 if(keys.includes('tag')&&keys.includes('scope')){
-                    gun.get('!TAGS/' + tags.scope).get(tags.tag).on(function(ids){
+                    let check = new Promise( (resolve, reject) => {
+                        let newKeys = gun.get('!TAGS/' + tags.scope).get(tags.tag).then()
+                        
+                        resolve(newKeys)
+                    })
+                    check.then( (ids) => {
                         for (const key in ids) {
                             if(ids[key] !== null){
                                 newKeys[key] = {'#':key}
                             }
-                         }
-                         newKeys = ids})
+                        }
+                        if(Object.keys(matchedKeys).length == 0){//only runs on 2nd call of function
+                            let objCopy = Object.assign({},newKeys)
+                            return objCopy
+                        }else{// checks for keys in this call vs the initial call keys
+                            for (const key in matchedKeys) {
+                                if(!newKeys.hasOwnProperty(key)){
+                                    delete matchedKeys[key]//removes all keys that don't match
+                                }
+                            }
+                        }
+                    })
                 }
                 if(keys.includes('tag')&&keys.includes('type')){
                     let ids = {};
@@ -453,16 +673,30 @@ function getTagged(tags, matchedKeys, inc, gun){//tags is an array of objects, w
                 break;
             case 1:
                 if (keys.includes('type')) {
-                    gun.get('!TYPE/' + tags.type).on(function(ids){
+                    let check = new Promise( (resolve, reject) => {
+                        let newKeys = gun.get('!TYPE/' + tags.type).then()
+                        
+                        resolve(newKeys)
+                    })
+                    check.then( (ids) => {
                         for (const key in ids) {
                             if(ids[key] !== null){
                                 newKeys[key] = {'#':key}
                             }
                         }
+                        if(Object.keys(matchedKeys).length == 0){//only runs on 2nd call of function
+                            let objCopy = Object.assign({},newKeys)
+                            return objCopy
+                        }else{// checks for keys in this call vs the initial call keys
+                            for (const key in matchedKeys) {
+                                if(!newKeys.hasOwnProperty(key)){
+                                    delete matchedKeys[key]//removes all keys that don't match
+                                }
+                            }
+                        }
                     })
                 }
                 if (keys.includes('scope')) {
-                    let ids = {};
                     gun.get('!TAGS/' + tags.scope).map()
                         .map(function(ids){
                             for (const key in ids) {
@@ -473,29 +707,33 @@ function getTagged(tags, matchedKeys, inc, gun){//tags is an array of objects, w
                          })
                 }
                 if (keys.includes('tag')) {
-                    gun.get('!TAGS/' + tags.tag).on(function(ids){
+                    let check = new Promise( (resolve, reject) => {
+                        let newKeys = gun.get('!TAGS/' + tags.tag).then()
+                        
+                        resolve(newKeys)
+                    })
+                    check.then( (ids) => {
                         for (const key in ids) {
-                           if(ids[key] !== null){
-                               newKeys[key] = {'#':key}
-                           }
-                        }    
+                            if(ids[key] !== null){
+                                newKeys[key] = {'#':key}
+                            }
+                        }
+                        if(Object.keys(matchedKeys).length == 0){//only runs on 2nd call of function
+                            let objCopy = Object.assign({},newKeys)
+                            return objCopy
+                        }else{// checks for keys in this call vs the initial call keys
+                            for (const key in matchedKeys) {
+                                if(!newKeys.hasOwnProperty(key)){
+                                    delete matchedKeys[key]//removes all keys that don't match
+                                }
+                            }
+                        }
                     })
                 }
-            
                 break;
         
             default:
                 break;
-        }
-        if(Object.keys(matchedKeys).length == 0){//only runs on 2nd call of function
-            let objCopy = Object.assign({},newKeys)
-            return objCopy
-        }else{// checks for keys in this call vs the initial call keys
-            for (const key in matchedKeys) {
-                if(!newKeys.hasOwnProperty(key)){
-                    delete matchedKeys[key]//removes all keys that don't match
-                }
-            }
         }
     }
 };
@@ -612,7 +850,7 @@ function assembleTree(gun, node, fromID, archived, max, inc, arr){
     //accumulate math?
     return res; // Should return the full tree
 }
-export function reduceRight(treeArr, method , acc){
+function reduceRight(treeArr, method , acc){
     acc = acc || false //accumulate all mapper returns to single value, if false, will tree reduce
     let reduced = 0
     let calcArr = JSON.parse(JSON.stringify(treeArr))//?
