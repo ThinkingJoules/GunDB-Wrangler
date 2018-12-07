@@ -37,6 +37,7 @@ function wrangle(gun) {
 //utility helpers
 function linkImport(nextType, linkProp, prevType, keyProp){
     gun = this.back(-1)
+    let prevNextLink = Object.keys(nodeTypes[prevType].next)[0]
     let next = new Promise( (resolve, reject) => {
         let lookup = gun.get('!TYPE/' + nextType).then()
         resolve(lookup)
@@ -44,54 +45,46 @@ function linkImport(nextType, linkProp, prevType, keyProp){
     let prev = new Promise( (resolve, reject) => {
         let lookup = gun.get('!TYPE/' + prevType).then()
         resolve(lookup)
-    })
-    Promise.all([next, prev])
-        .then(function(res){
-            // let filtered = []
-            // for (let i = 0; i < res.length; i++) {
-            //     const setNode = res[i];
-            //     for (const key in setNode) {
-            //         const value = setNode[key];
-            //         if (value !== null && key !== '_'){
-            //             if (!Array.isArray(filtered[i])){
-            //                 filtered[i] = []
-            //             }
-            //             filtered[i].push(key)
-            //         }
-            //     }
-            // }
-            // console.log(filtered)
-            Promise.all(res.map(function(collection) {
-                return fetchGunCollection(Object.keys(collection));
-            }))
-            .then(result => {
-                console.log(result)
-            });    
+    }).then(res => {
+        return new Promise((resolve, reject) => { 
+            let filtered = {}
+            for (const key in res) {
+                const value = res[key];
+                if (value !== null && key !== '_'){
+                    filtered[key] = key
+                }
+            }
+            resolve(filtered);
+        });
+    }).then(keys => { 
+        return Promise.all(Object.keys(keys).map(function(key){ 
+            return gun.get(key).then()
+        }))
+    }).then(results => {
+        console.log(results)
+        return results.reduce(function(obj, curr, idx, src){
+            if(typeof curr[keyProp] === 'string' && typeof curr[prevNextLink] === 'string'){
+                let id = prevType +'/'+ src[idx]['!ID']
+                obj[id] = curr[keyProp]
+                
+            }
+            return obj
+            },{})
+    }).then(prevKeys => {
+        console.log(prevKeys)
+        gun.get('!TYPE/' + nextType).map().on( (node, id) =>{
+            if(typeof node[linkProp] === 'string'){
+                let links = node[linkProp].split(',')
+                for (let i = 0; i < links.length; i++) {
+                    const link = links[i];
+                    let prevKey = getKeyByValue(prevKeys, link)
+                    if(prevKey){
+                        gun.get(id).get(linkProp).link(gun.get(prevKey))
+                    }
+                }
+            }  
         })
-    
-    // let prev = new Promise( (resolve, reject) => {
-    //     let lookup = gun.get('!TYPE/' + prevType).then()
-    //     let keys = Object.keys(lookup)
-    //     resolve(keys)
-    // }).then( (prevKeys)=> {
-    //     next.then( (nextKeys)=> {
-
-    //     })
-    // })
-    
-}
-function fetchGunCollection(arr) {
-    return Promise.all(arr.map(function(item) {
-        return fetchGunKey(item);
-    }));    
-}
-
-function fetchGunKey(key) {
-
-    return new Promise( (resolve, reject) => {
-        let lookup = gun.get(key).then()
-        resolve(lookup)
-        }) 
+    })
 }
 
 function massNewPut(state, putString, setString, data, failedArr, idObj) {
@@ -249,6 +242,7 @@ function settle(newData) {
     return gunRoot.get(nodeSoul)
 }
 function doubleLink(target){//intended to be used in place of .set. Target should be a gun.get("nodeType/00someID00")
+    console.log('linking')
     let gun = this;
     let fromProp = gun['_']['get'] || false//gun id last 'get', should be a prop of a known nodeType
     let nodeSoul = gun['_']['soul'] || false //should be undefined > false if they 'get' to a setlist node
