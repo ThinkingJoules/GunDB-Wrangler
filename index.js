@@ -45,6 +45,8 @@ function wrangle(gun) {
     gun.rePut = rePut
     gun.linkImport = linkImport
     gun.importSettle = importSettle
+    gun.reLinkPrev = reLinkPrev
+    gun.reLinkNext = reLinkNext
 
     gun.getListNodes = getListNodes
     gun.getFilteredList = getFilteredList
@@ -113,6 +115,230 @@ function rePut(type, keylen, data){
     
    
 }
+function reLinkNext(nextType, linkProp, prevType, nextData){
+    //nextData should acutally be orevData
+    //this one is a mess, it will make no sense reading it
+    //it is c&p of reLinkPrev with changes made to check
+    //should rename variables so it is not confusing
+    let gun = this.back(-1)
+    let prevNextLink = Object.keys(nodeTypes[prevType].next)[0]
+    let importID = nodeTypes[prevType].nav.importID
+    let nextGet = '!TYPE/' + nextType + '/!ALIAS'
+    let prevGet = '!TYPE/' + prevType + '/!ALIAS'
+    let prevLinks = '!TYPE/' + prevType
+    //let nextIDs = gunGetListProp(gun, nextGet, '!ID')
+    let next = gunGet(gun, nextGet)
+    let prev = gunGet(gun, prevGet)
+    let nodes = gunGetListNodes(gun,prevLinks)
+    let links = nodes.then(data =>{
+        return Promise.all(data.map(function(curr, idx){
+            const linksoul = curr[prevNextLink]['#']
+            if(linksoul){
+                return gunGet(gun,linksoul)
+            }else{
+                return curr[prevNextLink]
+            }
+        }))
+    })
+    let curLinks = Promise.all([nodes,links]).then(data =>{
+        let [nodes, links] = data
+        return nodes.reduce(function(acc,curr,idx){
+            let soul = curr[importID]
+            acc[soul] = links[idx]
+            return acc
+        },{})
+
+    })
+    Promise.all([next, prev, curLinks])
+        .then(data => {
+            let [nobj ,pobj, prevs] = data
+            let nout = {}
+            let missing = {}
+            let nextLinks = {}
+
+            for (let i = 0; i < nextData.length; i++) {
+
+                const key = pobj[nextData[i][importID]]['#'];
+                const value = nextData[i][prevNextLink]
+                const existing = prevs[nextData[i][importID]]
+                if(((typeof value === 'string' && value.length) || typeof value === 'number') || value === null){
+                    if(typeof value !== 'string'){
+                        let not = []
+                        not.push(value)
+                        nout[key] = not
+                    }else if (typeof value == 'string'){
+                        let idx = value.lastIndexOf(',') + 7
+                        let check = value[idx]
+                        if(!check){
+                            let not = []
+                            not.push(value)
+                            nout[key] = not  
+                        }else{
+                        let arr = value.split(', ')
+                        nout[key] = arr
+                        }
+                    }
+                }
+                let thisN = nout[key]
+                
+                if(thisN && thisN.length){
+                    for (let i = 0; i < thisN.length; i++) {
+                        
+                        const link = thisN[i];
+                        const linkalias = nobj[link]['#']
+
+                        if(!existing[linkalias]){
+                            if(!Array.isArray(missing[key])){
+                                missing[key] = []
+                                missing[key].push(link)
+                            }else{
+                                missing[key].push(link)
+                            }
+                        }
+                        if(!Array.isArray(nextLinks[key])){
+                            nextLinks[key] = []
+                            nextLinks[key].push(link)
+                        }else{
+                            nextLinks[key].push(link)
+                        }
+                    }
+                }
+            }
+            //missing object is all missing prev links
+            console.log(missing)
+            let puts = {} 
+            for (const nkey in missing) {
+                const links = missing[nkey];
+                puts[nkey] = []
+                for (let i = 0; i < links.length; i++) {
+                    let link = links[i];
+                    if (link[0] == '"'){
+                        link = link.slice(1, -1)
+                    }
+                    let prevKey = (nobj[link]) ? nobj[link]['#'] || false : false
+                    //console.log(prevKey)
+                    if(prevKey){
+                        gun.get(nkey).get(prevNextLink).put({})
+                        gun.get(nkey).get(prevNextLink).get(prevKey).put({'#': prevKey})
+                        console.log(nkey, link)
+
+                    }else{
+                        console.log(link)
+                    }
+                }
+            }
+        })
+}
+function reLinkPrev(nextType, linkProp, prevType, nextData){
+    let gun = this.back(-1)
+    let prevNextLink = Object.keys(nodeTypes[prevType].next)[0]
+    let importID = nodeTypes[nextType].nav.importID
+    let nextGet = '!TYPE/' + nextType + '/!ALIAS'
+    let prevGet = '!TYPE/' + prevType + '/!ALIAS'
+    let prevLinks = '!TYPE/' + nextType
+    //let nextIDs = gunGetListProp(gun, nextGet, '!ID')
+    let next = gunGet(gun, nextGet)
+    let prev = gunGet(gun, prevGet)
+    let nodes = gunGetListNodes(gun,prevLinks)
+    let links = nodes.then(data =>{
+        return Promise.all(data.map(function(curr, idx){
+            const linksoul = curr[linkProp]['#']
+            if(linksoul){
+                return gunGet(gun,linksoul)
+            }else{
+                return curr[linkProp]
+            }
+        }))
+    })
+    let curLinks = Promise.all([nodes,links]).then(data =>{
+        let [nodes, links] = data
+        return nodes.reduce(function(acc,curr,idx){
+            let soul = curr[importID]
+            acc[soul] = links[idx]
+            return acc
+        },{})
+
+    })
+    Promise.all([next, prev, curLinks])
+        .then(data => {
+            let [nobj ,pobj, prevs] = data
+            let nout = {}
+            let missing = {}
+            let nextLinks = {}
+
+            for (let i = 0; i < nextData.length; i++) {
+
+                const key = nobj[nextData[i][importID]]['#'];
+                const value = nextData[i][linkProp]
+                const existing = prevs[nextData[i][importID]]
+                if(((typeof value === 'string' && value.length) || typeof value === 'number') || value === null){
+                    if(typeof value !== 'string'){
+                        let not = []
+                        not.push(value)
+                        nout[key] = not
+                    }else if (typeof value == 'string'){
+                        let idx = value.lastIndexOf(',') + 7
+                        let check = value[idx]
+                        if(!check){
+                            let not = []
+                            not.push(value)
+                            nout[key] = not  
+                        }else{
+                        let arr = value.split(', ')
+                        nout[key] = arr
+                        }
+                    }
+                }
+                let thisN = nout[key]
+                
+                if(thisN && thisN.length){
+                    for (let i = 0; i < thisN.length; i++) {
+                        
+                        const link = thisN[i];
+                        const linkalias = pobj[link]['#']
+
+                        if(!existing[linkalias]){
+                            if(!Array.isArray(missing[key])){
+                                missing[key] = []
+                                missing[key].push(link)
+                            }else{
+                                missing[key].push(link)
+                            }
+                        }
+                        if(!Array.isArray(nextLinks[key])){
+                            nextLinks[key] = []
+                            nextLinks[key].push(link)
+                        }else{
+                            nextLinks[key].push(link)
+                        }
+                    }
+                }
+            }
+            //missing object is all missing prev links
+            //console.log(missing)
+            let puts = {} 
+            for (const nkey in missing) {
+                const links = missing[nkey];
+                puts[nkey] = []
+                for (let i = 0; i < links.length; i++) {
+                    let link = links[i];
+                    if (link[0] == '"'){
+                        link = link.slice(1, -1)
+                    }
+                    let prevKey = (pobj[link]) ? pobj[link]['#'] || false : false
+                    if(prevKey){
+                        //gun.get(key).get(linkProp).link(gun.get(prevKey))
+                        puts[nkey].push(prevKey)
+                        gun.get(nkey).get(linkProp).get(prevKey).put({'#': prevKey})
+                        gun.get(prevKey).get(prevNextLink).get(nkey).put({'#': nkey})
+                        //console.log(key,link,prevKey)
+                    }else{
+                        //console.log(link)
+                    }
+                }
+            }
+        })
+}   
 
 function linkImport(nextType, linkProp, prevType){
     let gun = this.back(-1)
@@ -251,10 +477,10 @@ function importSettle (newData){
     }
     handleTags(gun, result, type) 
 }
-async function cascade(method, curNode, settle){
+async function cascade(method, curNode, doSettle){
     let currentNode = Gun.obj.copy(curNode)
-    if(settle == undefined){
-        settle = true
+    if(doSettle == undefined){
+        doSettle = true
     }
     let gun = this.back(-1)
     console.log('cascading: ', method)
@@ -289,7 +515,7 @@ async function cascade(method, curNode, settle){
     }
     console.log(currentNode)
     let fnres = methodFn(currentNode)
-    if(!settle){
+    if(!doSettle){
         let mutate = Object.assign({}, currentNode, fnres)
         return mutate
     }else{
